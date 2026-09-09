@@ -1,0 +1,22 @@
+services:
+  app:
+    build: .
+    image: hr-carrier-bridge:latest
+    container_name: hr-carrier-bridge
+    env_file: .env
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  # Runs the suite against the working tree rather than the baked image, so a
+  # test run never silently exercises stale code.
+  tests:
+    build: .
+    image: hr-carrier-bridge:latest
+    profiles: ["test"]
+    env_file: .env
+    volumes:
+      - ./app:/srv/app:ro
+      - ./tests:/srv/tests:ro
+      - ./pytest.ini:/srv/pytest.ini:ro
+    command: ["python", "-m", "pytest"]
