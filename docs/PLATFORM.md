@@ -97,7 +97,30 @@ Agent`, language English, voice *Ellen — Serious, Direct and Confident* (`en-U
 matches the delivery northstar. These were not "platform defaults" as previously
 recorded — they were unset, and being unset is a hard validation error that blocks both
 publishing and `test-all`. The voice is a one-field change if a different register is
-wanted. The model is still unset and falls back to the platform default.
+wanted.
+
+**The model matters more than it looks.** The first live call failed on the model, not
+on the integration. On `gpt-5.6-luna` — the catalogue's cost-optimised tier, with no
+reasoning level — the agent received
+
+```json
+{"verified": true, "carrier_name": "BOLT BUS",
+ "agent_guidance": "Authority checks out for BOLT BUS. Next, confirm their identity…"}
+```
+
+and told the carrier *"I couldn't verify authority for MC 1515."* It read the tool
+result and took the opposite branch, then ended the call. The bridge returned `200`, the
+audit trail recorded `authorised: true`, and FMCSA was never the problem.
+
+That failure mode is the direct cost of the architecture: because the prompt holds no
+policy and every decision comes back from a tool, an agent that misreads a tool response
+has nothing to fall back on. Orchestrating ten tools under hard rules needs a model that
+reliably reads a boolean. Set to `gpt-5.6-terra-medium` on v2 — the smallest step up that
+fixes it without punishing voice latency.
+
+The prompt now also spells out how to read a result: a `true` boolean means the step
+passed, an empty `failure_reasons: []` is not a failure, and a tool *error* must never be
+reported to the carrier as a failed check.
 
 **6. Decide on Web Call enhanced security.** It is on by default, which requires a
 viewer to sign into the org. That is right for production and probably wrong for a
