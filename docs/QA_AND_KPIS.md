@@ -25,15 +25,16 @@ work rather than merely being present.
 
 ## Test suite
 
-71 tests, all passing. `docker compose run --rm tests`.
+78 tests, all passing. `docker compose run --rm tests`.
 
 | Module | Tests | Covers |
 |---|---|---|
 | `test_adversarial.py` | 20 | OTP bypass under seven framings, rate-ceiling extraction, round-limit evasion, state tampering |
-| `test_call_flow.py` | 15 | Happy path end to end, auth on every route, stage gating, degradation, edge cases |
+| `test_call_flow.py` | 17 | Happy path end to end, auth on every route, stage gating, degradation, edge cases |
 | `test_protocol_and_faults.py` | 14 | Wire codec, and all four injected fault shapes against a real misbehaving socket server |
 | `test_negotiation.py` | 13 | Policy engine: acceptance, counters, the three-round cap, ceiling invariants |
 | `test_leak_guard.py` | 9 | Response guard: nested fields, free text, thousands separators, carrier-named exemptions |
+| `test_validation_guidance.py` | 5 | Blank tool parameters return `agent_guidance` rather than a Pydantic dump |
 
 ### Standard scenarios
 
