@@ -4,7 +4,9 @@ import logging
 import sys
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 from app.api.routes import calls, deals, health, loads, ops, verification
 from app.config import get_settings
@@ -66,6 +68,65 @@ async def lifespan(app: FastAPI):
     yield
 
 
+# The voice agent fills tool parameters from what it just heard, and the webhook
+# nodes send every one as a JSON string. A parameter the agent did not capture
+# therefore arrives as "" rather than absent, and FastAPI's default 422 is a raw
+# Pydantic dump. The agent gets a validation blob, no instruction, and nothing to
+# say to the carrier — so it stalls or improvises. Every other error path here
+# carries agent_guidance; this one is the gap.
+_PARAM_REPAIR = {
+    "mc_number": "ask for their MC number and read it back to confirm",
+    "code": "ask them to read back the six-digit code you sent",
+    "carrier_offer": "ask what rate they need, and send it as a plain number",
+    "load_id": "confirm which load they are asking about",
+    "destination": "ask which email or phone number should receive the code",
+    "origin_state": "ask which state they are loading out of",
+    "equipment_type": "ask what they pull — dry van, reefer, flatbed, step deck or power only",
+}
+
+
+async def handle_validation_error(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    fields = []
+    for error in exc.errors():
+        parts = [str(p) for p in error.get("loc", ()) if p not in ("body", "query")]
+        if parts:
+            fields.append(parts[-1])
+
+    # A missing call_id is not something the carrier can answer. It means the
+    # agent lost the id from start_call, so tell it to recover rather than ask.
+    if "call_id" in fields:
+        guidance = (
+            "Internal: the call_id was missing. Call start_call and reuse the "
+            "call_id it returns for every later tool. Do not mention this to the "
+            "carrier — keep the conversation going."
+        )
+    else:
+        repairs = [_PARAM_REPAIR[f] for f in dict.fromkeys(fields) if f in _PARAM_REPAIR]
+        if repairs:
+            guidance = (
+                "Missing detail before this step can run: "
+                + "; ".join(repairs)
+                + ". Ask naturally, one question at a time, then call this tool again."
+            )
+        else:
+            guidance = (
+                "Something needed for this step was missing or malformed. Ask the "
+                "carrier to repeat the last detail, then call this tool again."
+            )
+
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "error": "invalid_parameters",
+            "message": "One or more tool parameters were missing or malformed.",
+            "fields": list(dict.fromkeys(fields)),
+            "agent_guidance": guidance,
+        },
+    )
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     # Swagger and the OpenAPI schema are served by FastAPI itself, outside the
@@ -86,6 +147,7 @@ def create_app() -> FastAPI:
         **docs_urls,
     )
     app.add_middleware(MaxRateLeakGuard)
+    app.add_exception_handler(RequestValidationError, handle_validation_error)
 
     app.include_router(health.router)
     app.include_router(calls.router)
