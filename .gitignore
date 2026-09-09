@@ -1,0 +1,104 @@
+# ─────────────────────────────────────────────────────────────
+# Secrets & local config
+# NOTHING with credentials is ever committed. Use .env.example
+# as the tracked template.
+# ─────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+secrets/
+credentials.json
+
+# ─────────────────────────────────────────────────────────────
+# Agent / editor scratch
+# ─────────────────────────────────────────────────────────────
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+.cursor/
+.aider*
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ─────────────────────────────────────────────────────────────
+# Docker — everything runs in containers. Local runtime state,
+# volumes and compose overrides stay out of the repo.
+# ─────────────────────────────────────────────────────────────
+docker-compose.override.yml
+compose.override.yml
+.docker/
+docker/data/
+volumes/
+*.pid
+
+# ─────────────────────────────────────────────────────────────
+# Python (integration layer / TMS socket client)
+# ─────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.hypothesis/
+
+# ─────────────────────────────────────────────────────────────
+# Node (HappyRobot Apps / operational UI, if used)
+# ─────────────────────────────────────────────────────────────
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.next/
+.nuxt/
+.turbo/
+.parcel-cache/
+*.tsbuildinfo
+
+# ─────────────────────────────────────────────────────────────
+# Local data, logs, test output
+# Call transcripts and TMS captures may contain carrier PII.
+# ─────────────────────────────────────────────────────────────
+*.log
+logs/
+*.sqlite
+*.sqlite3
+*.db
+data/
+tmp/
+.tmp/
+fixtures/local/
+captures/
+transcripts/
+test-results/
+qa-results/*.json
+!qa-results/.gitkeep
+
+# ─────────────────────────────────────────────────────────────
+# OS noise
+# ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
