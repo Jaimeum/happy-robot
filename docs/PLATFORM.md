@@ -33,12 +33,22 @@ The web call trigger means no phone number is provisioned, as the brief requires
 
 | Key | Purpose | Current value |
 |---|---|---|
-| `BRIDGE_BASE_URL` | Base URL of the bridge service | `https://bridge.example.com` — **placeholder** |
-| `BRIDGE_TOKEN` | Bearer token for the bridge (hidden in UI) | `REPLACE_WITH_API_AUTH_TOKEN` — **placeholder** |
+| `BRIDGE_BASE_URL` | Base URL of the bridge service | set to the live tunnel — **wired** |
+| `BRIDGE_TOKEN` | Bearer token for the bridge (hidden in UI) | set to `API_AUTH_TOKEN` — **wired** |
 
 All ten webhook nodes reference these, so pointing the workflow at a real deployment is
 two value edits, not twenty node edits. Set `BRIDGE_TOKEN` to the `API_AUTH_TOKEN` from
 your `.env`. Enter it in the platform UI rather than pasting it into a transcript.
+
+Both are wired and verified: `test-all` reports **12 passed, 0 failed**, with the bridge
+answering `201` on `/v1/calls/start` and `422` on the rest. The `422`s are correct for a
+test-all — the `{{$var:…}}` tool parameters have no values outside a live call — and they
+prove the bearer token is accepted, since a bad token returns `401` instead.
+
+Behind a tunnel, every webhook node also needs a `ngrok-skip-browser-warning: true`
+header. ngrok's free tier serves an HTML interstitial instead of the API when the
+request looks like it came from a browser, and the resulting parse failure looks like a
+broken bridge rather than a tunnel policy.
 
 ## What still needs a human
 
@@ -76,19 +86,26 @@ it: KPI tiles for the two invariants and margin protected, the funnel, the contr
 counters, TMS reliability, and the recent-calls table.
 
 **4. Enter the northstars.** Six behavioural criteria are written out in
-`docs/QA_AND_KPIS.md`. Creating them via MCP returned `404 Prompt node not found for
-this agent` against both the prompt node and the agent node, so they need to be entered
-in the Evaluate tab or the API path needs a look.
+`docs/QA_AND_KPIS.md`. Creating them via MCP still fails after retrying with an explicit
+`version_id`, and the two node ids fail differently: the prompt node returns `404 Prompt
+node not found for this agent`, the agent node `404 Node not found for this workflow` —
+while `list` resolves both. That points at the endpoint, not the ids, so enter them in
+the Evaluate tab.
 
-**5. Choose the agent's voice, language and model.** Left at platform defaults, since
-these are identity decisions rather than technical ones.
+**5. Choose the agent's voice, language and model.** Now set: name `Carrier Sales
+Agent`, language English, voice *Ellen — Serious, Direct and Confident* (`en-US`), which
+matches the delivery northstar. These were not "platform defaults" as previously
+recorded — they were unset, and being unset is a hard validation error that blocks both
+publishing and `test-all`. The voice is a one-field change if a different register is
+wanted. The model is still unset and falls back to the platform default.
 
 **6. Decide on Web Call enhanced security.** It is on by default, which requires a
 viewer to sign into the org. That is right for production and probably wrong for a
 reviewer opening a demo link — check the per-environment setting before recording.
 
-**7. Publish the version.** It is a draft. Publish once `BRIDGE_BASE_URL` points
-somewhere real, otherwise the tools will fail against the placeholder.
+**7. Publish the version.** Still a draft, and now the only thing standing between the
+workflow and a live web call: the variables are wired, the agent validates, and
+`test-all` is clean. `BRIDGE_BASE_URL` already points at a real tunnel.
 
 ## Org state as found
 
@@ -100,9 +117,24 @@ workflow was created alongside.
 
 - `update_workflow_nodes` replaces `configuration` wholesale. Fetch the current config
   with `get_node_details` first or you will silently wipe sibling fields.
-- Paragraph fields (`url`, header values) need real Plate arrays on `create_workflow`;
-  the string-template shorthand is only transformed on `update_workflow_nodes`.
+- Paragraph fields (`url`, header values) need real Plate arrays. The string-template
+  shorthand is **not** transformed on `update_workflow_nodes` for these fields — passing
+  a plain string returns `400 expected array, received string`.
 - Webhook v2 bodies go in `body.raw` as a JSON string with `{{$var:<node_id>.<param>}}`
   tokens, using the **tool node's** persistent id — not the action node's.
-- Environment variables interpolate as `{{ "env.KEY" }}` and are stored as a `variable`
-  node with `group_id: "env"`. That syntax is confirmed working here.
+- Workflow variables live under `group_id: "use_case_variables"`, **not** `"env"`.
+  An earlier note here claimed `env` was confirmed working; it was wrong, and it cost a
+  whole debugging session. A reference with `group_id: "env"` resolves to nothing, so the
+  webhook URL renders empty and the call fails with
+  `unsupported protocol scheme ""` — which reads like a bridge outage, not a bad
+  reference. Confirm the group id with `get_available_variables` before wiring anything,
+  and use `fix_broken_vars` (`dry_run=true` first) to audit the whole version.
+- The voice agent node requires `agent.name`, `agent.languages` and `agent.voices`.
+  Languages and voices are arrays of `templated_value` objects
+  (`{"type":"static","static":{"id":…,"name":…}}`), not bare id strings. Without them
+  `test-all` refuses to run at all, which hides every other node's status.
+- `manage_northstars` `create` is broken for this workflow shape: it 404s on both the
+  prompt node ("Prompt node not found for this agent") and the agent node ("Node not
+  found for this workflow"), even though `list` resolves both. Its
+  `positive_examples`/`negative_examples` also want Plate records, not the strings the
+  tool description advertises. Enter northstars in the Evaluate tab instead.
