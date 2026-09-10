@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, Request, status
 
 from app.domain.audit import AuditTrail, MemorySink
+from app.domain.board import BoardIndex
 from app.domain.sessions import CallSession, SessionStore, Stage
 from app.integrations.fmcsa import FmcsaClient
 from app.tms.client import TmsClient
@@ -22,6 +23,10 @@ def get_memory_sink(request: Request) -> MemorySink:
 
 def get_tms(request: Request) -> TmsClient:
     return request.app.state.tms
+
+
+def get_board(request: Request) -> BoardIndex:
+    return request.app.state.board
 
 
 def get_fmcsa(request: Request) -> FmcsaClient:

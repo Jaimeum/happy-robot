@@ -133,7 +133,7 @@ class TmsClient:
             self.stats.attempts += 1
             started = time.perf_counter()
             try:
-                payload = await self._roundtrip(frame)
+                payload = await self._roundtrip(frame, timeout=self._timeout_for(command))
                 records = self._decode(payload)
             except TmsCommandError as exc:
                 self.stats.command_errors += 1
@@ -166,8 +166,19 @@ class TmsClient:
             f"{command} did not return a usable response after {budget} attempt(s)"
         ) from last_error
 
-    async def _roundtrip(self, frame: bytes) -> str:
-        timeout = self._settings.tms_timeout_seconds
+    def _timeout_for(self, command: str) -> float:
+        """Reads get a short budget, writes keep the long one.
+
+        A read that inherits the booking timeout holds a live voice call silent for
+        ten seconds on one unlucky socket — forty times the measured p95. A booking
+        keeps the long budget, because a slow commit beats an uncertain one.
+        """
+        if command in READ_ONLY_COMMANDS:
+            return self._settings.tms_query_timeout_seconds
+        return self._settings.tms_timeout_seconds
+
+    async def _roundtrip(self, frame: bytes, *, timeout: float | None = None) -> str:
+        timeout = timeout if timeout is not None else self._settings.tms_timeout_seconds
         writer = None
         try:
             reader, writer = await asyncio.wait_for(

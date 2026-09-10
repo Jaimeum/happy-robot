@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -11,6 +12,7 @@ from fastapi.responses import JSONResponse
 from app.api.routes import calls, deals, health, loads, ops, verification
 from app.config import get_settings
 from app.domain.audit import AuditTrail, LogSink, MemorySink
+from app.domain.board import BoardIndex
 from app.domain.sessions import SessionStore
 from app.integrations.fmcsa import FmcsaClient
 from app.security.leak_guard import MaxRateLeakGuard
@@ -51,6 +53,10 @@ async def lifespan(app: FastAPI):
     app.state.sessions = SessionStore(ttl_seconds=settings.session_ttl_seconds)
     app.state.tms = TmsClient(settings)
     app.state.fmcsa = FmcsaClient(settings)
+    app.state.board = BoardIndex(app.state.tms, settings)
+    # Fire and forget: a cold or faulting TMS must not block boot, and no carrier
+    # ever waits on a board sweep.
+    app.state.board_task = asyncio.create_task(app.state.board.run_forever())
 
     logger = logging.getLogger("startup")
     logger.info("carrier bridge starting env=%s tms=%s:%s",
@@ -62,10 +68,13 @@ async def lifespan(app: FastAPI):
         # A second replica would strand calls mid-flight with an unknown call_id,
         # and it would fail silently from the carrier's point of view.
         logger.warning(
-            "Session state is in-process: run exactly ONE replica until the store "
-            "is externalised. Scale out will break live calls."
+            "Session state and the board snapshot are in-process: run exactly ONE "
+            "replica until the store is externalised. Scale out will break live calls."
         )
-    yield
+    try:
+        yield
+    finally:
+        app.state.board_task.cancel()
 
 
 # The voice agent fills tool parameters from what it just heard, and the webhook
