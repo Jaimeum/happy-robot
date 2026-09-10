@@ -122,6 +122,21 @@ The prompt now also spells out how to read a result: a `true` boolean means the 
 passed, an empty `failure_reasons: []` is not a failure, and a tool *error* must never be
 reported to the carrier as a failed check.
 
+**The model was only half of it.** On v2 the agent stopped giving the wrong answer and
+started looping instead: `verify_carrier_authority` ran four times, each returning
+`verified: true`, and the call never reached the code step. Two causes, both introduced
+or missed on the previous pass:
+
+1. Every tool had `message.type: "none"`, so the line went silent while tools ran. The
+   carrier fills that silence — the first live transcript has them saying *"Hello?"*
+   right after `start_call`, and repeating their MC number after `verify_carrier_authority`.
+2. The new prompt said to "call the tool once more" on an unreadable result, with no
+   cap. A repeated MC number plus an uncapped retry is a loop.
+
+Fixed on v3: AI fillers on all nine conversational tools, and a prompt rule that a step
+is finished once its tool returns — never re-run a step, acknowledge a repeat and carry
+on from where the call actually is, and retry a genuine error at most once.
+
 **6. Decide on Web Call enhanced security.** It is on by default, which requires a
 viewer to sign into the org. That is right for production and probably wrong for a
 reviewer opening a demo link — check the per-environment setting before recording.
@@ -140,6 +155,22 @@ workflow was created alongside.
 
 - `update_workflow_nodes` replaces `configuration` wholesale. Fetch the current config
   with `get_node_details` first or you will silently wipe sibling fields.
+- **A tool node's `function` is a full replace too**, and this one bites hard. Sending
+  `{"function": {"message": …}}` to add a filler wiped that tool's `parameters` and
+  `description` — the agent was left a tool it could no longer call correctly. The tool
+  description says only that tool nodes "accept `function` field updates", which reads
+  like a merge. Always send the complete `function`: `message`, `parameters`,
+  `description`, `tool_index_id` and `tool_index_hash`. Change one tool, re-read it, then
+  do the rest.
+- **A tool's `message` is what the caller hears while the tool runs**, not what comes
+  back to the agent. `none` means the line goes dead for the whole call — including a
+  multi-second TMS search. On a voice call that silence is not cosmetic: the carrier
+  assumes they were not heard and repeats themselves, and the agent treats the repeat as
+  new input. Use `ai` (the agent generates a contextual line, guided by `description` and
+  `example`) or `fixed`. Only `end_call_log` should stay silent.
+  Watch the wording on `check_rate`: "let me see what I can do" or "how much room I
+  have" hints at a ceiling the agent is forbidden to disclose. "Let me run that number"
+  is neutral.
 - Paragraph fields (`url`, header values) need real Plate arrays. The string-template
   shorthand is **not** transformed on `update_workflow_nodes` for these fields — passing
   a plain string returns `400 expected array, received string`.
