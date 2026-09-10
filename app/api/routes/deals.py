@@ -108,7 +108,21 @@ async def negotiate(
                within_ceiling=outcome.within_ceiling,
                carrier_said=payload.carrier_said)
 
-    if outcome.decision is Decision.ACCEPTED:
+    if outcome.replayed:
+        # Repeat the number we already gave and hold. Improving our own offer
+        # against an unchanged carrier position is how margin leaks.
+        if outcome.broker_counter:
+            guidance = (
+                f"They have already had ${outcome.broker_counter} for that number. "
+                f"Repeat it and hold — do not improve it. {outcome.rounds_remaining} "
+                "round(s) left."
+            )
+        else:
+            guidance = (
+                "That is the same number they already gave, and the answer has not "
+                f"changed: {outcome.reason}. Say it again plainly and do not move."
+            )
+    elif outcome.decision is Decision.ACCEPTED:
         session.agreed_rate = outcome.agreed_rate
         session.selected_load_id = negotiation.load_id
         session.advance_to(Stage.RATE_AGREED)
@@ -144,6 +158,7 @@ async def negotiate(
         rounds_remaining=outcome.rounds_remaining,
         broker_counter=outcome.broker_counter, agreed_rate=outcome.agreed_rate,
         may_book=outcome.may_book, may_transfer=outcome.may_transfer,
+        replayed=outcome.replayed,
         agent_guidance=guidance,
     )
 
@@ -157,6 +172,22 @@ async def book(
 ) -> BookingResponse:
     session = load_session(payload.call_id, sessions)
     require_stage(session, Stage.RATE_AGREED, "Booking")
+
+    # Booking is idempotent per load, per call. LOAD_BOOK has a long timeout and
+    # is never retried, so a webhook timeout on a slow-but-successful commit
+    # leaves the agent with no result and every reason to fire again. Without
+    # this, the second attempt gets ALREADY_BOOKED from the TMS and the carrier
+    # who just heard their reference is told someone else took the load.
+    if session.booking_ref and session.booked_load_id == payload.load_id:
+        return BookingResponse(
+            call_id=session.call_id, stage=session.stage_label, booked=True,
+            load_id=payload.load_id, booking_reference=session.booking_ref,
+            agreed_rate=session.agreed_rate, booking_status="CONFIRMED",
+            agent_guidance=(
+                f"Already booked on this call, reference {session.booking_ref}. Read "
+                "it back to them again — do not book it a second time."
+            ),
+        )
 
     negotiation = session.negotiations.get(payload.load_id)
     if negotiation is None or negotiation.status is not NegotiationStatus.AGREED:
@@ -228,6 +259,7 @@ async def book(
 
     booking_ref = confirmation.get("BOOKING_REF")
     session.booking_ref = booking_ref
+    session.booked_load_id = payload.load_id
     session.outcome = Outcome.BOOKED
     session.advance_to(Stage.BOOKED)
     audit.emit(session.call_id, EventType.BOOKING_CONFIRMED, mc_number=session.mc_number,
@@ -260,6 +292,24 @@ async def handoff(
     """
     session = load_session(payload.call_id, sessions)
 
+    # A terminated call must never be transferred. `terminate()` sets stage to
+    # CLOSED, which is the HIGHEST stage value, so the ordering check below —
+    # stage < BOOKED — passes for a call that was rejected outright. Handoff is
+    # the one route with no require_stage, so this is the only place that catches
+    # it. Verified live: a carrier with no operating authority was refused and
+    # still got transferred=True with a place in the senior-rep queue.
+    if session.terminated:
+        audit.emit(session.call_id, EventType.HANDOFF_WITHHELD, mc_number=session.mc_number,
+                   reason=f"call_closed:{session.termination_reason}")
+        return HandoffResponse(
+            call_id=session.call_id, stage=session.stage_label, transferred=False,
+            reason="call_closed",
+            agent_guidance=(
+                f"This call was closed ({session.termination_reason}). There is no "
+                "transfer. Say a short, polite goodbye and stop."
+            ),
+        )
+
     if session.outcome == Outcome.FAILED_NEGOTIATION or any(
         n.status is NegotiationStatus.FAILED for n in session.negotiations.values()
     ):
@@ -285,7 +335,11 @@ async def handoff(
 
     reference = f"HO-{secrets.token_hex(4).upper()}"
     session.handoff_ref = reference
-    session.outcome = Outcome.TRANSFERRED
+    # Only promote a booked call. Never overwrite a terminal outcome — a rejected
+    # or failed call keeps the outcome it earned, or the audit trail would show a
+    # transfer where the brokerage actually turned the carrier away.
+    if session.outcome == Outcome.BOOKED:
+        session.outcome = Outcome.TRANSFERRED
     session.advance_to(Stage.CLOSED)
     if payload.notes:
         session.notes.append(payload.notes)

@@ -115,6 +115,9 @@ class CallSession:
     offered_load_ids: set[str] = field(default_factory=set)
 
     booking_ref: str | None = None
+    # Which load the reference belongs to, so a repeat booking of the same load
+    # returns the same reference instead of asking the TMS twice.
+    booked_load_id: str | None = None
     agreed_rate: int | None = None
     handoff_ref: str | None = None
     notes: list[str] = field(default_factory=list)

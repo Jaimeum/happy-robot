@@ -194,6 +194,9 @@ class NegotiateResponse(BaseModel):
     agreed_rate: int | None = None
     may_book: bool
     may_transfer: bool
+    # True when this was the same number asked again: the previous outcome
+    # stands and no round was consumed.
+    replayed: bool = False
     agent_guidance: str
 
 

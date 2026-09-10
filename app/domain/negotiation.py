@@ -68,6 +68,9 @@ class NegotiationOutcome:
     may_book: bool = False
     may_transfer: bool = False
     reason: str = ""
+    # The same number asked again. The previous outcome is repeated verbatim and
+    # no round is consumed — see Negotiation.evaluate.
+    replayed: bool = False
     # Internal-only. Recorded in the audit trail, never returned to a caller.
     within_ceiling: bool = False
 
@@ -124,6 +127,32 @@ class Negotiation:
                 may_transfer=self.status is NegotiationStatus.AGREED,
                 reason="negotiation is already closed",
             )
+
+        # The same number asked twice is one carrier position, not two rounds.
+        # Without this, three identical asks of 2600 walked our own offer from
+        # 2300 to 2495 and then accepted 2600 on the final round: the bridge
+        # negotiated against itself, gave away the whole gap, and burned the
+        # entire three-round cap on a carrier who said one number once.
+        # Exact equality with the immediately preceding offer only — never
+        # "close to" — so walking the number up in small steps still terminates.
+        if self.rounds:
+            last = self.rounds[-1]
+            if last.carrier_offer == carrier_offer and (
+                datetime.now(timezone.utc) - last.at
+            ).total_seconds() < 90:
+                return NegotiationOutcome(
+                    decision=last.decision,
+                    round_number=last.number,
+                    rounds_remaining=max(0, self.max_rounds - self.rounds_used),
+                    status=self.status,
+                    broker_counter=last.broker_counter,
+                    agreed_rate=self.agreed_rate,
+                    may_book=self.status is NegotiationStatus.AGREED,
+                    may_transfer=self.status is NegotiationStatus.AGREED,
+                    reason="same offer repeated; previous outcome stands",
+                    replayed=True,
+                    within_ceiling=self.max_rate is not None and carrier_offer <= self.max_rate,
+                )
 
         if self.rounds_used >= self.max_rounds:
             return self._fail("round limit already reached")

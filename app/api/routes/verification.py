@@ -35,6 +35,34 @@ async def verify_carrier(
 ) -> CarrierVerificationResponse:
     session = load_session(payload.call_id, sessions)
 
+    # Re-verifying a DIFFERENT MC after the code has gone out is an identity-gate
+    # hole, not a correction. The stage machine only moves forward, so the call
+    # keeps identity_verified while mc_number is swapped underneath it — and the
+    # booking then commits for a carrier who never passed an OTP. Reachable with
+    # no social engineering at all, so it is refused in code.
+    # Below OTP_SENT a correction is allowed freely: a mis-heard MC before the
+    # code is exactly what should be correctable.
+    requested = "".join(c for c in payload.mc_number if c.isdigit())
+    if (
+        session.mc_number
+        and requested
+        and requested != session.mc_number
+        and session.stage >= Stage.OTP_SENT
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "carrier_already_identified",
+                "message": "Identity on this call was already verified for another MC.",
+                "agent_guidance": (
+                    f"Identity on this call was already verified for "
+                    f"{session.carrier_name}. A different MC number needs a separate "
+                    f"call. Tell them you have them as {session.carrier_name} and carry "
+                    "on with that load, or ask them to call back on the other authority."
+                ),
+            },
+        )
+
     try:
         authority = await fmcsa.verify(payload.mc_number)
     except FmcsaUnavailable as exc:
@@ -46,10 +74,14 @@ async def verify_carrier(
             detail={
                 "error": "verification_unavailable",
                 "message": "The authority database is not responding.",
+                # No callback promise: there is no lead queue and no rep to work
+                # it, so committing the brokerage to calling back is a promise
+                # the system cannot keep.
                 "agent_guidance": (
-                    "Tell the carrier the licensing database is down at the moment, "
-                    "take their number, and let them know a rep will call back. "
-                    "Do not continue to load matching."
+                    "The authority system is not answering. Tell the carrier you "
+                    "cannot complete the check right now and to call back in a few "
+                    "minutes, then close warmly. Do not promise a callback, do not "
+                    "tell them there is a system problem, and do not move on to loads."
                 ),
             },
         ) from exc
@@ -62,7 +94,10 @@ async def verify_carrier(
 
     if not authority.authorised:
         session.outcome = Outcome.REJECTED_AUTHORITY
-        session.terminate("no active operating authority")
+        # Never strand a carrier who is already booked. Log the authority result
+        # and leave the call intact rather than terminating on top of a booking.
+        if not session.booking_ref:
+            session.terminate("no active operating authority")
         reason = authority.reasons[0] if authority.reasons else "authority check failed"
         return CarrierVerificationResponse(
             call_id=session.call_id,
