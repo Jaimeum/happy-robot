@@ -15,7 +15,7 @@ ceiling must block booking rather than reject every rate.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 EQUIPMENT_TYPES = ("DRY_VAN", "REEFER", "FLATBED", "STEP_DECK", "POWER_ONLY")
 
@@ -51,6 +51,122 @@ def normalise_equipment(value: str | None) -> str | None:
     if collapsed in EQUIPMENT_TYPES:
         return collapsed
     return _EQUIPMENT_ALIASES.get(key)
+
+
+_STATE_CODES = frozenset(
+    "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO "
+    "MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY".split()
+)
+
+_STATE_NAMES = {
+    "ALABAMA": "AL", "ALASKA": "AK", "ARIZONA": "AZ", "ARKANSAS": "AR",
+    "CALIFORNIA": "CA", "CALI": "CA", "COLORADO": "CO", "CONNECTICUT": "CT",
+    "DELAWARE": "DE", "DISTRICT OF COLUMBIA": "DC", "WASHINGTON DC": "DC", "D C": "DC",
+    "FLORIDA": "FL", "GEORGIA": "GA", "HAWAII": "HI", "IDAHO": "ID",
+    "ILLINOIS": "IL", "INDIANA": "IN", "IOWA": "IA", "KANSAS": "KS",
+    "KENTUCKY": "KY", "LOUISIANA": "LA", "MAINE": "ME", "MARYLAND": "MD",
+    "MASSACHUSETTS": "MA", "MICHIGAN": "MI", "MINNESOTA": "MN", "MISSISSIPPI": "MS",
+    "MISSOURI": "MO", "MONTANA": "MT", "NEBRASKA": "NE", "NEVADA": "NV",
+    "NEW HAMPSHIRE": "NH", "NEW JERSEY": "NJ", "NEW MEXICO": "NM", "NEW YORK": "NY",
+    "NORTH CAROLINA": "NC", "NORTH DAKOTA": "ND", "OHIO": "OH", "OKLAHOMA": "OK",
+    "OREGON": "OR", "PENNSYLVANIA": "PA", "RHODE ISLAND": "RI",
+    "SOUTH CAROLINA": "SC", "SOUTH DAKOTA": "SD", "TENNESSEE": "TN", "TEXAS": "TX",
+    "UTAH": "UT", "VERMONT": "VT", "VIRGINIA": "VA", "WASHINGTON": "WA",
+    "WASHINGTON STATE": "WA", "WEST VIRGINIA": "WV", "WISCONSIN": "WI", "WYOMING": "WY",
+}
+
+_WEEKDAYS = {
+    "MONDAY": 0, "TUESDAY": 1, "WEDNESDAY": 2, "THURSDAY": 3,
+    "FRIDAY": 4, "SATURDAY": 5, "SUNDAY": 6,
+}
+
+
+def equipment_label(value: str | None) -> str:
+    """DRY_VAN -> "Dry Van", for a sentence read aloud."""
+    if not value:
+        return "that equipment"
+    return _EQUIPMENT_LABELS.get(value, value.replace("_", " ").title())
+
+
+def normalise_state(value: str | None) -> str | None:
+    """Map a spoken state onto a wire-legal two-letter code.
+
+    Same reason as normalise_equipment: the TMS rejects anything that is not two
+    uppercase letters, so a carrier who says "California" would otherwise end the
+    search with a wire error. Returns None rather than a nearest match — guessing
+    a state would put a carrier on the wrong side of the country.
+    """
+    if not value:
+        return None
+    key = " ".join(value.strip().upper().replace(".", "").split())
+    if key in _STATE_CODES:
+        return key
+    return _STATE_NAMES.get(key)
+
+
+def normalise_pickup_date(value: str | None, *, today: date | None = None) -> str | None:
+    """Map a spoken pickup day onto the wire's YYYYMMDD.
+
+    The wire takes an exact calendar day and nothing else, so "Thursday" used to be
+    dash-stripped and sent verbatim, which the TMS answered as malformed. `today` is
+    resolved once per request by the caller so a long call cannot drift mid-request.
+    """
+    if not value:
+        return None
+    today = today or date.today()
+    key = " ".join(value.strip().upper().split())
+
+    relative = {"TODAY": 0, "TONIGHT": 0, "TOMORROW": 1, "DAY AFTER TOMORROW": 2}
+    if key in relative:
+        return (today + timedelta(days=relative[key])).strftime("%Y%m%d")
+
+    forced_next = key.startswith("NEXT ")
+    weekday_key = key[5:].strip() if forced_next else key
+    if weekday_key in _WEEKDAYS:
+        ahead = (_WEEKDAYS[weekday_key] - today.weekday()) % 7
+        if forced_next:
+            ahead = ahead + 7 if ahead == 0 else ahead
+        return (today + timedelta(days=ahead)).strftime("%Y%m%d")
+
+    # Only dashes are stripped here. Stripping slashes too would turn
+    # "09/16/2026" into the 8 digits "09162026" and fail it as YYYYMMDD before
+    # the MM/DD/YYYY branch below ever ran.
+    digits = key.replace("-", "")
+    if len(digits) == 8 and digits.isdigit():
+        try:
+            return datetime.strptime(digits, "%Y%m%d").strftime("%Y%m%d")
+        except ValueError:
+            return None
+
+    for fmt in ("%m/%d/%Y", "%m/%d/%y"):
+        try:
+            return datetime.strptime(key, fmt).strftime("%Y%m%d")
+        except ValueError:
+            pass
+
+    # "9/16" — the next occurrence, so a carrier naming a day in December in
+    # January does not get sent eleven months back.
+    parts = key.split("/")
+    if len(parts) == 2 and all(p.isdigit() for p in parts):
+        month, day = int(parts[0]), int(parts[1])
+        for year in (today.year, today.year + 1):
+            try:
+                candidate = date(year, month, day)
+            except ValueError:
+                return None
+            if candidate >= today:
+                return candidate.strftime("%Y%m%d")
+    return None
+
+
+def spoken_day(wire_date: str | None) -> str | None:
+    """YYYYMMDD -> "Friday September 11", for a concession the agent reads aloud."""
+    if not wire_date:
+        return None
+    try:
+        return datetime.strptime(wire_date, "%Y%m%d").strftime("%A %B %-d")
+    except ValueError:
+        return None
 
 
 def _to_int(value: str | None) -> int | None:
