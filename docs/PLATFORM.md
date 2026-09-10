@@ -162,6 +162,19 @@ workflow was created alongside.
   like a merge. Always send the complete `function`: `message`, `parameters`,
   `description`, `tool_index_id` and `tool_index_hash`. Change one tool, re-read it, then
   do the rest.
+- **`test-all` overwrites every webhook node's stored output, and that output IS the
+  schema the agent is handed.** This is the trap that cost three live calls. A test-all
+  run sends empty `{{$var:…}}` parameters, so nine of the ten webhooks answer `422`, and
+  their recorded output becomes `{"error": …}`. From then on the agent gets an `error`
+  field on every tool — even when the bridge answers `200` with `verified: true`. It
+  reads that correctly and reports a failure, so the symptom looks like a bad model or a
+  bad prompt and is neither.
+  `POST /v1/calls/start` is the tell: it has a static body, returns `201` under test-all,
+  and is the one tool that kept working through all three broken calls.
+  Check with `get_available_variables` — read-only, safe. If a webhook group shows only
+  **Error**, the schema is poisoned. Restore it with `set_custom_output` per node, and
+  **do not run `test-all` or `fix_broken_vars` afterwards** or you undo the repair.
+  Verify with `get_available_variables`, never with a test run.
 - **A tool's `message` is what the caller hears while the tool runs**, not what comes
   back to the agent. `none` means the line goes dead for the whole call — including a
   multi-second TMS search. On a voice call that silence is not cosmetic: the carrier
