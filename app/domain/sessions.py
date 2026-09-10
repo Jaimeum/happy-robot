@@ -76,6 +76,19 @@ class OtpChallenge:
 
 
 @dataclass
+class SearchAttempt:
+    """One search on one call, kept so an identical repeat need not hit the wire."""
+
+    number: int
+    fingerprint: str
+    rung: str
+    match_count: int
+    guidance: str
+    loads: list = field(default_factory=list)
+    at: float = field(default_factory=time.time)
+
+
+@dataclass
 class CallSession:
     call_id: str
     created_at: datetime
@@ -91,6 +104,15 @@ class CallSession:
 
     selected_load_id: str | None = None
     negotiations: dict[str, Negotiation] = field(default_factory=dict)
+
+    # Every search run on this call, so an identical one can be answered from
+    # here instead of the wire, and so a call cannot search forever. Guidance
+    # alone cannot guarantee an agent stops; this can.
+    searches: list["SearchAttempt"] = field(default_factory=list)
+    # The load ids this call was actually handed. A load that was never offered
+    # cannot be detailed, priced or booked — so a fabricated load id costs at
+    # most one bad sentence and can never reach the system of record.
+    offered_load_ids: set[str] = field(default_factory=set)
 
     booking_ref: str | None = None
     agreed_rate: int | None = None

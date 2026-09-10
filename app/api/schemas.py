@@ -42,12 +42,18 @@ class VerifyOtpRequest(Strict):
 class SearchLoadsRequest(Strict):
     call_id: str = Field(min_length=1, max_length=128)
     origin_city: str | None = Field(default=None, max_length=64)
-    origin_state: str | None = Field(default=None, max_length=2)
+    # Voice gives you "California", not "CA". The route normalises; a value that
+    # will not resolve is dropped from the filters rather than 422'd back at the
+    # agent, because the carrier already answered the question.
+    origin_state: str | None = Field(default=None, max_length=32)
     destination_city: str | None = Field(default=None, max_length=64)
-    destination_state: str | None = Field(default=None, max_length=2)
+    destination_state: str | None = Field(default=None, max_length=32)
     equipment_type: str | None = Field(default=None, max_length=32)
     pickup_date: str | None = Field(default=None, max_length=16)
-    limit: int = Field(default=3, ge=1, le=10)
+    # The platform tool sends no limit, so a default of 3 meant every live search
+    # asked the wire for three of ten open dry vans and reported three as the whole
+    # answer. The agent should see what is actually there.
+    limit: int = Field(default=10, ge=1, le=10)
 
 
 class LoadDetailRequest(Strict):
@@ -142,10 +148,32 @@ class LoadSummary(BaseModel):
 class SearchLoadsResponse(BaseModel):
     call_id: str
     stage: str
+    # Total matched at the winning rung, not a page size. returned_count is how
+    # many are in `loads`.
     match_count: int
     loads: list[LoadSummary]
     degraded: bool = False
     agent_guidance: str
+
+    # How the answer was reached. The agent has to be able to say the truth about
+    # a relaxed search out loud, so the reasoning ships in the payload rather
+    # than being left for the model to re-derive.
+    search_basis: str = "exact"
+    rung: str = "exact"
+    returned_count: int = 0
+    relaxed: list[str] = Field(default_factory=list)
+    # The sentence to say before pitching, pre-built. Honesty should not depend
+    # on the model reconstructing which filter was dropped.
+    spoken_concession: str | None = None
+    equipment_note: str | None = None
+    exhausted: bool = False
+    # The real option set: every row has load_count >= 1, so there is nothing in
+    # here the agent can offer that is not actually on the board.
+    board_facts: dict = Field(default_factory=dict)
+    searches_used: int = 0
+    searches_remaining: int = 0
+    may_search_again: bool = True
+    repeat_of_search: int | None = None
 
 
 class LoadDetailResponse(BaseModel):

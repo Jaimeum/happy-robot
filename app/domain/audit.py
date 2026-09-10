@@ -37,6 +37,14 @@ class EventType:
     OTP_FAILED = "otp_failed"
     OTP_BYPASS_ATTEMPT = "otp_bypass_attempt"
     LOADS_SEARCHED = "loads_searched"
+    # The exact filters found nothing and the ladder relaxed one to find something.
+    SEARCH_WIDENED = "search_widened"
+    # An identical search on the same call, answered from the call record.
+    SEARCH_REPEATED = "search_repeated"
+    # The per-call search cap. The whole option set is handed over instead.
+    SEARCH_BUDGET_EXHAUSTED = "search_budget_exhausted"
+    # A load id that this call was never handed. Refused before any TMS call.
+    LOAD_NOT_OFFERED = "load_not_offered"
     LOAD_PITCHED = "load_pitched"
     NEGOTIATION_ROUND = "negotiation_round"
     CEILING_BREACH_ATTEMPT = "ceiling_breach_attempt"

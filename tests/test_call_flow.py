@@ -168,7 +168,12 @@ def test_search_degrades_gracefully_when_the_tms_is_down(client, verified_call, 
     body = result.json()
     assert body["degraded"] is True
     assert body["match_count"] == 0
-    assert "not responding" in body["agent_guidance"]
+    guidance = body["agent_guidance"].lower()
+    # Keep the carrier on the line, retry once, and commit to nothing. The old
+    # string promised "a rep will call back", which no endpoint can deliver.
+    assert "briefly down" in guidance
+    assert "once more" in guidance
+    assert "do not promise a callback" in guidance
 
 
 def test_uncertain_booking_is_escalated_not_retried(client, verified_call, tms):
@@ -218,13 +223,20 @@ def test_an_uncertain_booking_does_land_on_the_manual_check_queue(client, verifi
     assert dashboard["controls"]["loads_lost_to_another_carrier"] == 0
 
 
-def test_no_matching_loads_offers_an_alternative(client, verified_call, tms):
+def test_no_matching_loads_never_invites_the_agent_to_guess(client, verified_call, tms):
+    # The old guidance said "ask if they are flexible on destination or pickup
+    # day", and an agent followed it into ten dead searches over six minutes.
+    # With no board snapshot the honest move is to ask one open question, not to
+    # send the agent cycling through destinations and dates.
     tms.records = []
     body = client.post("/v1/loads/search",
                        json={"call_id": verified_call, "origin_state": "WY"},
                        headers=AUTH).json()
     assert body["match_count"] == 0
-    assert "flexible" in body["agent_guidance"]
+    guidance = body["agent_guidance"].lower()
+    assert "flexible" not in guidance
+    assert "pickup day" not in guidance
+    assert body["may_search_again"] is True
 
 
 def test_unknown_equipment_is_rejected_with_a_usable_prompt(client, verified_call):
