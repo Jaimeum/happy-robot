@@ -180,3 +180,43 @@ def test_nothing_for_that_equipment_anywhere_says_so_plainly(client, board_call,
     assert "do not ask them to be flexible" in guidance
     assert "do not promise a callback" in guidance
     assert "do not search again" in guidance
+
+
+# ------------------------------------------------------- the offer ledger
+
+def test_a_load_that_was_never_offered_cannot_be_detailed(client, board_call):
+    search(client, board_call, origin_state="TX", equipment_type="dry van")
+
+    response = client.post("/v1/loads/detail",
+                           json={"call_id": board_call, "load_id": "LD00784"},
+                           headers=AUTH)
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["error"] == "load_not_offered"
+    # The agent must not cover for itself by claiming the load was taken.
+    assert "do not say it was taken" in detail["agent_guidance"].lower()
+
+
+def test_a_load_that_was_never_offered_cannot_be_priced(client, board_call):
+    # This one matters most: get_load is what loads the rate ceiling.
+    search(client, board_call, origin_state="TX", equipment_type="dry van")
+
+    response = client.post("/v1/negotiate",
+                           json={"call_id": board_call, "load_id": "LD00784",
+                                 "carrier_offer": 5000}, headers=AUTH)
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["error"] == "load_not_offered"
+
+
+def test_a_load_that_was_offered_still_works(client, board_call):
+    body = search(client, board_call, origin_state="TX", equipment_type="dry van")
+    offered = body["loads"][0]["load_id"]
+
+    response = client.post("/v1/loads/detail",
+                           json={"call_id": board_call, "load_id": offered},
+                           headers=AUTH)
+
+    assert response.status_code == 200
+    assert response.json()["load"]["load_id"] == offered

@@ -481,6 +481,27 @@ async def _detail(
     session = load_session(call_id, sessions)
     require_stage(session, Stage.IDENTITY_VERIFIED, "Load details")
 
+    # The offer ledger. Once this call has been handed loads, a load id that was
+    # not among them cannot be detailed — so a fabricated id costs at most one
+    # bad sentence and can never reach the system of record or load a ceiling.
+    # Only enforced once something has actually been offered; before that there
+    # is nothing to compare against, and an invented id 404s at the TMS anyway.
+    if session.offered_load_ids and load_id not in session.offered_load_ids:
+        audit.emit(session.call_id, EventType.LOAD_NOT_OFFERED,
+                   mc_number=session.mc_number, load_id=load_id)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "load_not_offered",
+                "message": "That load was not offered on this call.",
+                "agent_guidance": (
+                    "That load is not one you were given. Do not say it was taken and "
+                    "do not invent another. Pitch one of the loads from your last "
+                    "search, or search once more."
+                ),
+            },
+        )
+
     try:
         record = await tms.get_load(load_id)
     except TmsUnavailable as exc:

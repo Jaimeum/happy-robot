@@ -40,6 +40,23 @@ async def _negotiation_for(
         protect_value(existing.max_rate)
         return existing
 
+    # Same offer ledger as load detail: a load this call was never handed cannot
+    # be priced. This one matters more, because get_load is what loads the rate
+    # ceiling into the request.
+    if session.offered_load_ids and load_id not in session.offered_load_ids:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "load_not_offered",
+                "message": "That load was not offered on this call.",
+                "agent_guidance": (
+                    "That load is not one you were given. Do not say it was taken and "
+                    "do not quote a number on it. Pitch one of the loads from your "
+                    "last search."
+                ),
+            },
+        )
+
     try:
         record = await tms.get_load(load_id)
     except TmsUnavailable as exc:
