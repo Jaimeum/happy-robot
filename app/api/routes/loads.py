@@ -449,10 +449,18 @@ async def search_loads(
             "state. If they cannot, take the lane they want and close warmly."
         ).strip()
     else:
+        # Lead with the load, not the absence. This guidance used to open with
+        # the concession — "Nothing going to Nevada. What I do have is…" — and a
+        # live call proved why that is wrong: the agent relayed the first clause,
+        # the carrier heard "nothing", and switched equipment believing there was
+        # no van freight at all. There was: this very response carried it.
+        qualifier = f" Then, if it matters to them, add what is not there: {concession}" if concession else ""
         guidance = (
-            f"{prefix}{concession or ''} What I do have for a {label}: {_pitch(top)}. "
-            f"Say the concession out loud first, then pitch that load. Do not offer any "
-            "city, state or pickup day that is not in `loads` or `board_facts.origin_states`."
+            f"{prefix}Lead with this load: {_pitch(top)}. Pitch it and ask if they "
+            f"want it.{qualifier} Do NOT open with what you do not have — a carrier "
+            "who hears \"nothing\" first assumes there is nothing at all and stops "
+            "listening. Do not offer any city, state or pickup day that is not in "
+            "`loads` or `board_facts.origin_states`."
         ).strip()
     if equipment_note:
         guidance = f"{guidance} {equipment_note}"

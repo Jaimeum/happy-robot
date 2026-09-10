@@ -47,7 +47,13 @@ def test_the_concession_is_a_sentence_the_agent_can_read_out(client, board_call)
     assert "nothing going to UT" in concession
     assert "nothing out of San Diego itself" in concession
     assert concession.endswith(".")
-    assert "San Jose" in body["agent_guidance"]
+
+    # The guidance must LEAD with the load, not the concession. Opening with the
+    # negative is what made a live agent relay "nothing" and lose a real load.
+    guidance = body["agent_guidance"]
+    assert guidance.startswith("Lead with this load")
+    assert "San Jose" in guidance
+    assert guidance.index("San Jose") < guidance.index("Nothing picking up")
 
 
 def test_equipment_is_never_relaxed(client, board_call):
@@ -247,5 +253,5 @@ def test_staying_in_their_state_still_pitches(client, board_call):
                   equipment_type="dry van")
 
     assert body["relaxed"] == ["origin_city"]
-    assert "pitch that load" in body["agent_guidance"]
+    assert body["agent_guidance"].startswith("Lead with this load")
     assert "Do NOT pitch" not in body["agent_guidance"]
