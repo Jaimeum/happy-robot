@@ -141,9 +141,13 @@ on from where the call actually is, and retry a genuine error at most once.
 viewer to sign into the org. That is right for production and probably wrong for a
 reviewer opening a demo link — check the per-environment setting before recording.
 
-**7. Publish the version.** Still a draft, and now the only thing standing between the
-workflow and a live web call: the variables are wired, the agent validates, and
-`test-all` is clean. `BRIDGE_BASE_URL` already points at a real tunnel.
+**7. Publish the version.** v4 is the current draft and is the one to publish. It
+carries the load-matching work: the data-only prompt rules, the `search_loads` tool
+description that stops the agent guessing filter combinations, AI fillers on the nine
+conversational tools, transcription keyterms and context, and refreshed output schemas
+on all ten webhooks.
+
+Do NOT run `test-all` or `fix_broken_vars` on it — see the schema trap below.
 
 ## Org state as found
 
@@ -162,6 +166,14 @@ workflow was created alongside.
   like a merge. Always send the complete `function`: `message`, `parameters`,
   `description`, `tool_index_id` and `tool_index_hash`. Change one tool, re-read it, then
   do the rest.
+- **A fork does not carry the webhook output schemas either.** Same failure as the
+  `test-all` trap below, reached a different way: v4 was forked from a v3 whose schemas
+  had been repaired, and nine of the ten webhooks came back showing only **Error**. If
+  that had been published, the agent would have been handed an `error` field on every
+  tool again and the original bug would have returned intact. **After every fork, re-set
+  `set_custom_output` on all ten webhook nodes and confirm with
+  `get_available_variables` before publishing.** Treat "I fixed this last version" as
+  worthless: check the version you are about to publish.
 - **`test-all` overwrites every webhook node's stored output, and that output IS the
   schema the agent is handed.** This is the trap that cost three live calls. A test-all
   run sends empty `{{$var:…}}` parameters, so nine of the ten webhooks answer `422`, and
