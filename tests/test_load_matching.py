@@ -220,3 +220,32 @@ def test_a_load_that_was_offered_still_works(client, board_call):
 
     assert response.status_code == 200
     assert response.json()["load"]["load_id"] == offered
+
+
+# ------------------------------------------------------- out of their region
+
+def test_leaving_their_state_offers_a_menu_not_a_load(client, board_call):
+    # Reproduced live: a carrier in California with a flatbed was offered
+    # Charleston SC to Savannah GA, 83 miles at $210 — first only because it
+    # picked up soonest. Honest, 4,000 km away, and it read as "found nothing".
+    body = search(client, board_call, origin_state="CA", equipment_type="flatbed")
+
+    assert "origin_state" in body["relaxed"], "the ladder must have left CA"
+    guidance = body["agent_guidance"]
+    assert "Do NOT pitch a load" in guidance
+    assert "which they can get to" in guidance
+    # The real states, with real counts, so the carrier can pick one.
+    assert "IL" in guidance or "SC" in guidance
+    # The loads are still returned in case the carrier asks — just not pitched.
+    assert body["loads"]
+
+
+def test_staying_in_their_state_still_pitches(client, board_call):
+    # San Diego to San Jose is a long way, but it is in-state and the concession
+    # says so. That case should still lead with the load.
+    body = search(client, board_call, origin_city="San Diego", origin_state="CA",
+                  equipment_type="dry van")
+
+    assert body["relaxed"] == ["origin_city"]
+    assert "pitch that load" in body["agent_guidance"]
+    assert "Do NOT pitch" not in body["agent_guidance"]

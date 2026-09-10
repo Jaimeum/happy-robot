@@ -420,6 +420,14 @@ async def search_loads(
             exhausted=ladder.exhausted, guidance=guidance, record=False,
         )
 
+    # Dropping the origin STATE means we have left the carrier's region entirely.
+    # A load is still returned so the agent has it if they ask, but it must not be
+    # pitched: leading a carrier in California with Charleston to Savannah, 83
+    # miles at $210 — first only because it picks up soonest — is honest and
+    # useless, and it is what makes the agent sound like it found nothing.
+    # Out of region, the useful answer is the menu of states that actually have
+    # their equipment, so they can say which one they can get to.
+    left_their_region = "origin_state" in ladder.dropped
     basis = "cached" if degraded_to_snapshot else "widened"
     audit.emit(session.call_id, EventType.SEARCH_WIDENED, mc_number=session.mc_number,
                filters={"rung": ladder.rung, "dropped": ",".join(ladder.dropped)},
@@ -431,11 +439,21 @@ async def search_loads(
         "Working from the board copy taken a moment ago. Quote it normally — the load "
         "is re-checked when you pull the details. " if basis == "cached" else ""
     )
-    guidance = (
-        f"{prefix}{concession or ''} What I do have for a {label}: {_pitch(top)}. "
-        f"Say the concession out loud first, then pitch that load. Do not offer any "
-        "city, state or pickup day that is not in `loads` or `board_facts.origin_states`."
-    ).strip()
+    if left_their_region:
+        guidance = (
+            f"{prefix}{concession or ''} Do NOT pitch a load — everything left is out "
+            f"of their region and offering one would sound like you are not listening. "
+            f"Say the concession, then tell them where you actually have a {label} and "
+            f"ask which they can get to: {_states_clause(facts)}. Those states and "
+            "counts are real; name two or three. If they can reach one, search that "
+            "state. If they cannot, take the lane they want and close warmly."
+        ).strip()
+    else:
+        guidance = (
+            f"{prefix}{concession or ''} What I do have for a {label}: {_pitch(top)}. "
+            f"Say the concession out loud first, then pitch that load. Do not offer any "
+            "city, state or pickup day that is not in `loads` or `board_facts.origin_states`."
+        ).strip()
     if equipment_note:
         guidance = f"{guidance} {equipment_note}"
     return respond(
